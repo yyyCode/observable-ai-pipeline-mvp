@@ -49,10 +49,11 @@ def create_task(body: CreateTask):
             retry = s.get("retry") or {}
             conn.execute(
                 """INSERT INTO steps(id,task_id,name,step_order,status,depends_on_json,config_json,
-                       retry_max,retry_count,gpu_count,gpu_memory_mb,timeout_s,updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       definition_json,retry_max,retry_count,gpu_count,gpu_memory_mb,timeout_s,updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (new_id(), task_id, s["name"], s["order"], StepStatus.PENDING,
                  json.dumps(s["depends_on"]), json.dumps(effective),
+                 json.dumps(s, ensure_ascii=False, sort_keys=True),
                  int(retry.get("max_attempts", 3)), 0,
                  int(s["gpu"]["count"]), int(s["gpu"]["memory_mb"]),
                  int(s.get("timeout_s", 180)), iso()),
@@ -267,19 +268,22 @@ def overview():
 
 @router.post("/tasks/{task_id}/retry")
 def retry_task(task_id: str):
-    task = _task_or_404(task_id)
-    if task["status"] != TaskStatus.FAILED:
-        raise HTTPException(409, detail="only FAILED tasks are retryable")
-    pipeline = load_pipeline(settings.pipeline_dir, task["pipeline_name"], task["pipeline_version"])
+    _task_or_404(task_id)
     with tx() as conn:
+        # 在写事务内重新读取状态，避免并发重试把同一任务重置两次。
+        task = conn.execute("SELECT status FROM tasks WHERE id=?", (task_id,)).fetchone()
+        if task["status"] != TaskStatus.FAILED:
+            raise HTTPException(409, detail="only FAILED tasks are retryable")
         failed = conn.execute(
             "SELECT name FROM steps WHERE task_id=? AND status='FAILED' ORDER BY step_order",
             (task_id,),
         ).fetchall()
+        reset: set[str] = set()
         if failed:
             # 多个独立分支可能同时失败；逐一重置，重复的重置是幂等的。
             for row in failed:
-                _reset_downstream(conn, task_id, pipeline, row["name"])
+                target = _reset_downstream(conn, task_id, row["name"])
+                reset |= target
         else:
             conn.execute("UPDATE steps SET status='PENDING', retry_count=0, updated_at=? WHERE task_id=? AND status IN ('CANCELED','SKIPPED')",
                          (iso(), task_id))
@@ -287,13 +291,25 @@ def retry_task(task_id: str):
             "UPDATE tasks SET status='RUNNING', cancel_requested=0, finished_at=NULL, error_code=NULL, error_message=NULL, updated_at=? WHERE id=?",
             (iso(), task_id),
         )
-        append_event(conn, task_id, "task.retried")
+        append_event(conn, task_id, "task.retried", payload={"steps": sorted(reset)})
     return {"id": task_id, "status": "RUNNING"}
 
 
-def _reset_downstream(conn, task_id: str, pipeline: dict, step_name: str) -> None:
-    from app.pipeline import dependents
-    targets = {step_name} | dependents(pipeline, step_name)
+def _reset_downstream(conn, task_id: str, step_name: str) -> set[str]:
+    """重置步骤及其全部下游；依赖图来自任务快照，不依赖磁盘上的 Pipeline 文件。"""
+    rows = conn.execute(
+        "SELECT name, depends_on_json FROM steps WHERE task_id=?", (task_id,)
+    ).fetchall()
+    deps = {row["name"]: set(_loads(row["depends_on_json"], [])) for row in rows}
+    targets = {step_name}
+    while True:
+        downstream = {
+            name for name, spec in deps.items()
+            if name not in targets and spec & targets
+        }
+        if not downstream:
+            break
+        targets |= downstream
     for name in targets:
         current = conn.execute(
             "SELECT status FROM steps WHERE task_id=? AND name=?", (task_id, name)
@@ -311,6 +327,7 @@ def _reset_downstream(conn, task_id: str, pipeline: dict, step_name: str) -> Non
             "DELETE FROM artifacts WHERE task_id=? AND step_id=(SELECT id FROM steps WHERE task_id=? AND name=?)",
             (task_id, task_id, name),
         )
+    return targets
 
 
 def _task_or_404(task_id: str) -> dict:
@@ -322,23 +339,27 @@ def _task_or_404(task_id: str) -> dict:
 
 @router.post("/tasks/{task_id}/steps/{name}/retry")
 def retry_step(task_id: str, name: str):
-    task = _task_or_404(task_id)
-    if task["status"] not in ("RUNNING", "FAILED"):
-        raise HTTPException(409, detail="task is not retryable")
-    if task["cancel_requested"]:
-        raise HTTPException(409, detail="task is canceling")
-    step = query_one("SELECT * FROM steps WHERE task_id=? AND name=?", (task_id, name))
-    if not step or step["status"] != "FAILED":
-        raise HTTPException(409, detail="only FAILED steps are retryable")
-    pipeline = load_pipeline(settings.pipeline_dir, task["pipeline_name"], task["pipeline_version"])
+    _task_or_404(task_id)
     with tx() as conn:
-        _reset_downstream(conn, task_id, pipeline, name)
+        task = conn.execute(
+            "SELECT status, cancel_requested FROM tasks WHERE id=?", (task_id,)
+        ).fetchone()
+        if task["status"] not in ("RUNNING", "FAILED"):
+            raise HTTPException(409, detail="task is not retryable")
+        if task["cancel_requested"]:
+            raise HTTPException(409, detail="task is canceling")
+        step = conn.execute(
+            "SELECT status FROM steps WHERE task_id=? AND name=?", (task_id, name)
+        ).fetchone()
+        if not step or step["status"] != "FAILED":
+            raise HTTPException(409, detail="only FAILED steps are retryable")
+        reset = _reset_downstream(conn, task_id, name)
         conn.execute(
             """UPDATE tasks SET status='RUNNING', finished_at=NULL, error_code=NULL,
                    error_message=NULL, updated_at=? WHERE id=?""",
             (iso(), task_id),
         )
-        append_event(conn, task_id, "task.retried", payload={"step": name})
+        append_event(conn, task_id, "task.retried", payload={"step": name, "steps": sorted(reset)})
     return {"id": task_id, "status": "RUNNING"}
 
 

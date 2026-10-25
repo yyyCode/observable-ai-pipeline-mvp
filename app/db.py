@@ -24,8 +24,17 @@ def init_db() -> None:
     conn = connect()
     try:
         conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        _migrate(conn)
+        conn.commit()
     finally:
         conn.close()
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """轻量向前迁移；演示项目不引入迁移框架。"""
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(steps)")}
+    if "definition_json" not in columns:
+        conn.execute("ALTER TABLE steps ADD COLUMN definition_json TEXT NOT NULL DEFAULT '{}'")
 
 
 @contextmanager

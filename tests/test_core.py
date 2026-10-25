@@ -4,7 +4,8 @@ from pathlib import Path
 import pytest
 
 from app.domain import StepStatus, TaskStatus, assert_transition
-from app.errors import ConfigError, TransitionError
+from app.errors import ConfigError, FatalError, TransitionError
+from app.executor import validate_outputs
 from app.fingerprint import step_fingerprint
 from app.handlers import (
     HANDLERS, HandlerContext, ingest, extract_frames, segment_subject,
@@ -65,3 +66,28 @@ def test_mock_outputs_carry_source_provenance():
         assert source.encode() in payload, func.__name__
     # handler 注册表覆盖流水线中引用的全部实现。
     assert set(HANDLERS) == {f"mock.{f.__name__}" for f in funcs}
+
+
+def test_handlers_match_pipeline_output_contract():
+    source = "fixture/contract.gif"
+    params = {"source": source, "style": "watercolor", "target_fps": 12,
+              "slow_steps": {name: 0 for name in (
+                  "ingest", "extract_frames", "segment_subject", "style_transfer",
+                  "upscale", "compose_spritesheet", "publish")}}
+    pipeline = load_pipeline(Path("pipelines"), "animated-asset", "1")
+    for step in pipeline["steps"]:
+        ctx = HandlerContext(
+            step_name=step["name"], config=resolve_effective_config(step, params),
+            params=params, attempt_no=1, cancel_event=threading.Event(),
+            log=lambda record: None,
+        )
+        outputs = HANDLERS[step["handler"]](ctx)
+        validate_outputs(step, outputs)
+        assert source.encode() in b"".join(outputs.values()), step["name"]
+
+    with pytest.raises(FatalError):
+        validate_outputs({"outputs": ["expected.txt"]}, {"other.txt": b"x"})
+    with pytest.raises(FatalError):
+        validate_outputs({"outputs": ["../escape.txt"]}, {"../escape.txt": b"x"})
+    with pytest.raises(FatalError):
+        validate_outputs({"outputs": ["a.txt"]}, {"a.txt": "not-bytes"})

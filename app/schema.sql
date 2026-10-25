@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS steps (
   status TEXT NOT NULL,
   depends_on_json TEXT NOT NULL,
   config_json TEXT NOT NULL,
+  definition_json TEXT NOT NULL DEFAULT '{}',
   fingerprint TEXT,
   retry_max INTEGER NOT NULL DEFAULT 3,
   retry_count INTEGER NOT NULL DEFAULT 0,

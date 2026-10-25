@@ -3,7 +3,7 @@ import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from app import metrics
 from app.cas import exists_and_valid, put_bytes
@@ -174,9 +174,9 @@ def _dispatch_ready() -> None:
         if s["cancel_requested"]:
             _transition_step(s, StepStatus.CANCELED, "step.canceled")
             continue
-        pipeline = load_pipeline(settings.pipeline_dir, s["pipeline_name"], s["pipeline_version"])
-        step_def = next(x for x in pipeline["steps"] if x["name"] == s["name"])
-        prepared = _prepare(s, step_def, pipeline, json.loads(s["params_json"]))
+        step_def = _step_definition(s)
+        prepared = _prepare(s, step_def, s["pipeline_name"], str(s["pipeline_version"]),
+                            json.loads(s["params_json"]))
         if _try_reuse(s, prepared):
             continue
 
@@ -233,7 +233,20 @@ def _dispatch_ready() -> None:
         slots -= 1
 
 
-def _prepare(step: dict, step_def: dict, pipeline: dict, task_params: dict) -> dict:
+def _step_definition(step: dict) -> dict:
+    """优先使用任务提交时的定义快照；旧任务回退到磁盘 Pipeline。"""
+    try:
+        definition = json.loads(step.get("definition_json") or "{}")
+    except (TypeError, ValueError):
+        definition = {}
+    if definition.get("handler"):
+        return definition
+    pipeline = load_pipeline(settings.pipeline_dir, step["pipeline_name"], step["pipeline_version"])
+    return next(x for x in pipeline["steps"] if x["name"] == step["name"])
+
+
+def _prepare(step: dict, step_def: dict, pipeline_name: str, pipeline_version: str,
+             task_params: dict) -> dict:
     effective = resolve_effective_config(step_def, task_params)
     deps = json.loads(step["depends_on_json"])
     input_shas = []
@@ -241,14 +254,14 @@ def _prepare(step: dict, step_def: dict, pipeline: dict, task_params: dict) -> d
         rows = query_all(
             f"""SELECT a.sha256 FROM artifacts a JOIN steps s ON s.id=a.step_id
                 WHERE s.task_id=? AND s.name IN ({','.join('?' * len(deps))})
-                ORDER BY a.name""",
+                ORDER BY s.name, a.name""",
             (step["task_id"], *deps),
         )
         input_shas = [r["sha256"] for r in rows]
-    fp = step_fingerprint(pipeline["name"], str(pipeline["version"]), step["name"],
+    fp = step_fingerprint(pipeline_name, pipeline_version, step["name"],
                           effective, input_shas, HANDLER_VERSION)
     return {"fingerprint": fp, "effective": effective, "input_shas": input_shas,
-            "pipeline_name": pipeline["name"]}
+            "pipeline_name": pipeline_name}
 
 
 def _try_reuse(step: dict, prepared: dict) -> bool:
@@ -337,6 +350,7 @@ def _run_attempt(step: dict, attempt_id: str, prepared: dict, step_def: dict, de
         outputs = HANDLERS[step_def["handler"]](ctx)
         if cancel.is_set():
             raise CanceledError("CANCELED", "canceled after handler")
+        validate_outputs(step_def, outputs)
         _complete_success(step, attempt_id, outputs, prepared, time.monotonic() - started)
     except CanceledError as exc:
         reason = _cancel_reasons.get(attempt_id, "user")
@@ -372,6 +386,26 @@ def _inject_faults(step_name: str, params: dict, attempt_no: int) -> None:
         raise RetryableError(inj.get("code", "INJECTED_TRANSIENT"), "injected transient failure")
     if int(inj.get("fatal_attempt", 0)) == attempt_no:
         raise FatalError(inj.get("code", "INJECTED_FATAL"), "injected fatal failure")
+
+
+def validate_outputs(step_def: dict, outputs) -> None:
+    """在写入 CAS/数据库前校验 Handler 是否遵守步骤的输出契约。"""
+    if not isinstance(outputs, dict):
+        raise FatalError("OUTPUT_CONTRACT", "handler must return dict[str, bytes]")
+    expected = set(step_def.get("outputs") or [])
+    actual = set(outputs)
+    missing, extra = sorted(expected - actual), sorted(actual - expected)
+    if missing or extra:
+        raise FatalError(
+            "OUTPUT_CONTRACT",
+            f"handler outputs do not match pipeline: missing={missing} extra={extra}",
+        )
+    for name, data in outputs.items():
+        path = PurePosixPath(name)
+        if not name or "\\" in name or path.is_absolute() or ".." in path.parts:
+            raise FatalError("OUTPUT_CONTRACT", f"invalid output name: {name!r}")
+        if not isinstance(data, (bytes, bytearray)):
+            raise FatalError("OUTPUT_CONTRACT", f"output {name!r} is not bytes")
 
 
 def _complete_success(step: dict, attempt_id: str, outputs: dict[str, bytes],

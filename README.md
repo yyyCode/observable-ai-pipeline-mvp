@@ -28,7 +28,7 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```bash
 make install
 make run          # --reload，端口 8000
-make test         # 8 个单元 / API 测试
+make test         # 10 个单元 / API 测试
 make demo         # 7 个端到端演示场景
 make reset        # 删除 data/ 与 logs/
 ```
@@ -175,6 +175,7 @@ ingest → extract_frames → segment_subject → style_transfer → upscale
 - **参数按需绑定**。`source` 只绑定到 ingest，`target_fps` 只绑定到抽帧，`style` 只绑定到风格迁移；参数变化只会让相关步骤及其下游的指纹失效，不会让无关分支重跑。这是「结果复用」正确性的基础。
 - **异构资源的可解释排队**。GPU 步骤声明 `gpu.count` 与 `gpu.memory_mb`，调度器按显存授予租约；显存不足时步骤进入 `WAITING_RESOURCE`，而不是占着线程空转。这样 GPU 队列、租约和 OOM 重试都能在 Dashboard 上直接观察。
 - **失败策略按阶段配置**。抽帧、抠像、放大允许更多次重试，发布步骤超时更短；`retry_on` 只对 RETRYABLE 生效，FATAL 立即失败。把策略放进 pipeline 定义，避免执行器里写死某个步骤的特例。
+- **提交时快照，执行期不可变**。创建任务时把完整步骤定义（handler、依赖、输出、重试、GPU、超时）写入 `steps.definition_json`；调度、恢复和人工重试都读快照，不再依赖可变的 Pipeline 文件。Handler 输出还会在写 CAS 前按 `outputs` 契约校验，防止实现与声明漂移。
 - **可解释优先于吞吐**。MVP 刻意选择单进程 + SQLite，把状态迁移、尝试记录、事件和产物引用放在同一个事务边界内；先保证「任何一次执行都能回答发生了什么」，再讨论分布式调度。GPU 是 Mock，但排队、租约、OOM、释放的语义与真实调度器一致。
 
 ## 6. 持久化设计
@@ -182,7 +183,7 @@ ingest → extract_frames → segment_subject → style_transfer → upscale
 | 表 | 作用 | 关键字段 |
 |---|---|---|
 | `tasks` | 任务级状态、参数、回调 | `status`, `trace_id`, `cancel_requested`, `error_code` |
-| `steps` | 步骤定义快照与状态 | `depends_on_json`, `config_json`, `fingerprint`, `retry_count`, `timeout_s` |
+| `steps` | 步骤定义快照与状态 | `definition_json`, `depends_on_json`, `config_json`, `fingerprint`, `retry_count`, `timeout_s` |
 | `step_attempts` | 每次执行的审计记录 | `attempt_no`, `status`, `lease_expires_at`, `metrics_json`, `log_path` |
 | `artifacts` | 任务产物引用 | `sha256`, `size_bytes`, `mime` |
 | `step_cache` | 跨任务结果复用 | `fingerprint` → artifacts + `hit_count` |
@@ -274,7 +275,7 @@ Dashboard 使用 2 秒轮询（SSE 端点保留给上游集成）；所有动态
 | Task 4 | 单文件 Dashboard（任务/详情/事件/产物/GPU/总览） | 90 min | 完成，含桌面与移动端检查 |
 | Task 5 | 演示脚本、Docker、Makefile、README；**CP2** | 90 min | 完成，7/7 场景通过 |
 
-计划原为 1 个工作日；实际由单次 AI 结对会话完成，整体墙钟约 1.5 小时（含设计、实现、截图与端到端复跑），主要节省来自：先写规格与计划、把验证压缩为 CP1/CP2、以及只保留 8 个单元/API 测试 + 7 个演示场景。
+计划原为 1 个工作日；实际由单次 AI 结对会话完成，整体墙钟约 1.5 小时（含设计、实现、截图与端到端复跑），主要节省来自：先写规格与计划、把验证压缩为 CP1/CP2、以及只保留 10 个单元/API 测试 + 7 个演示场景。
 
 与计划的偏差：
 
@@ -329,11 +330,12 @@ Token 花得最多的部分：
 - **修复**：所有 Mock handler 的输出都写入 `source`（`_source(ctx)`）；演示脚本为每个场景生成唯一 source；CP1 复跑后 fatal 正确失败，cache 场景仍 7/7 复用。
 - **改进**：如果 fingerprint 只依赖 artifact SHA，必须保证 artifact 内容真的编码了全部相关输入；否则应把关键输入显式加入 fingerprint，或在集成测试中构造「同 SHA 不同输入」的对抗用例。
 
-### 13.2 超时值没有持久化（计划评审阶段发现）
+### 13.2 步骤定义只持久化了一部分（计划评审阶段发现，后已完整修复）
 
 - **现象**：计划中的心跳线程每次超时检查都重新加载 pipeline 文件。
-- **风险**：pipeline 文件在运行中被修改或删除时，超时判定会漂移甚至失败；也放大了磁盘 I/O。
-- **修复**：创建任务时把 `timeout_s` 快照到 `steps.timeout_s`，心跳直接读数据库。超时语义以提交时的快照为准。
+- **风险**：pipeline 文件在运行中被修改或删除时，超时判定会漂移甚至失败；handler、依赖和输出契约同样会漂移。
+- **第一步修复**：创建任务时把 `timeout_s` 快照到 `steps.timeout_s`，心跳直接读数据库。
+- **完整修复**：创建任务时把完整步骤定义写入 `steps.definition_json`，调度与人工重试都使用快照；`_reset_downstream` 也改为从数据库依赖图计算下游。启动迁移会为旧库补列，旧任务保留磁盘回退路径。回归测试在重试前把 `PIPELINE_DIR` 指向不存在的目录，任务仍能完成。
 
 ### 13.3 多分支失败时只重试第一步（计划评审阶段发现）
 
@@ -373,7 +375,7 @@ Token 花得最多的部分：
 | Dashboard 2s 轮询 | 事件延迟最多 2s | 切换到现有 SSE 端点 |
 | 回调至少一次 | 接收方可能收到重复通知 | 接收方按 `Idempotency-Key` 去重 |
 | 无鉴权/限流 | 只适合本地演示 | 网关 + 认证 + 配额 |
-| Pipeline 文件可变 | 运行中的任务仍从磁盘读取 handler/depends；文件变更会影响执行 | 提交时快照完整定义，或用不可变版本目录 |
+| Handler 版本需手动升级 | 修改 handler 实现但忘记 bump `HANDLER_VERSION`，可能复用旧缓存 | 用代码哈希或镜像 digest 自动参与指纹 |
 | 回调 URL 可指向任意地址 | 本地演示无 SSRF 防护 | 生产环境加出口白名单/内网地址拦截 |
 
 ## 15. 仓库结构
@@ -397,6 +399,7 @@ pipelines/
 web/
   index.html     单文件 Dashboard（无构建链）
 tests/
+  conftest.py    临时数据目录，隔离测试与本地 data/
   test_core.py
   test_api.py
 scripts/
@@ -421,8 +424,8 @@ Mock 任务无法评估「画面好不好」，因此本 MVP 把结果评估拆�
 
 ### 16.2 分层验证方法
 
-1. **单元测试**：状态迁移守卫、pipeline 参数绑定、缺失参数拒绝、指纹对参数敏感/对无关字段不敏感，以及 Mock 产物必须携带 `source` 的回归用例（防止缓存误命中复发）。
-2. **API 集成测试**：创建任务 → 成功完成；注入一次瞬时失败 → 断言 2 次尝试且最终成功。使用 `TestClient` 启动完整 lifespan，覆盖真实调度器与 SQLite。
+1. **单元测试**：状态迁移守卫、pipeline 参数绑定、缺失参数拒绝、指纹对参数敏感/对无关字段不敏感、Mock 产物必须携带 `source`，以及 Handler 输出名称/类型必须匹配 `outputs` 契约。
+2. **API 集成测试**：创建任务 → 成功完成并校验步骤定义快照；注入一次瞬时失败 → 断言 2 次尝试且最终成功；注入致命失败 → 人工单步重试，在 Pipeline 文件不可用时仍恢复全部下游。使用 `TestClient` 启动完整 lifespan，覆盖真实调度器与 SQLite；测试数据目录由 `conftest.py` 隔离到临时目录。
 3. **端到端演示断言**：7 个场景不仅看最终状态，还断言过程证据——retry 的尝试次数、fatal 的下游 SKIPPED、cache 的 7/7 复用、GPU 的队列出现与 `CUDA_OOM` 错误码、cancel 的上游产物保留、crash 的 `recovery.resumed` 事件和最终成功。
 4. **人工 UI 检查**：1440×1000 与 504×1700 两档截图，检查任务列表、失败详情、事件、产物、GPU 与总览；深链接 `?task=` / `?tab=` 可直接复现页面状态。
 5. **运行指标**：`/metrics` 暴露任务/步骤计数、耗时直方图、缓存命中、GPU 显存与队列、Outbox 积压；`/api/overview` 给出成功率、平均耗时与缓存命中数。
@@ -431,13 +434,13 @@ Mock 任务无法评估「画面好不好」，因此本 MVP 把结果评估拆�
 
 - **不能只看终态**。CP1 的 fatal 场景曾因缓存误命中而「成功」，终态断言会放过错误。因此演示脚本额外检查 `reused`、`error_code`、尝试次数和事件类型；这是本项目最重要的一次评估方法修正。
 - **故障注入与缓存场景使用相反的数据策略**。故障注入场景每次生成唯一 `source`，确保不会命中旧缓存而绕过故障；缓存场景刻意复用同一 `source`，验证 7/7 命中。两者互补。
-- **隔离运行**。演示脚本使用临时 `DATA_DIR` 与独立端口，避免本地历史数据影响断言；crash 场景在独立临时目录中硬杀进程后再启动。
+- **隔离运行**。测试通过 `tests/conftest.py` 在导入配置前把 `DATA_DIR`/`LOG_DIR` 指向临时目录；演示脚本使用独立临时数据目录和端口，避免本地历史数据影响断言；crash 场景在独立临时目录中硬杀进程后再启动。
 - **用确定性 Mock 换可重复性**。Mock handler 的耗时与输出可控，使“重试、排队、崩溃”在秒级稳定复现；真实模型的不确定性不适合做这类状态机测试。
 - **当前评估的边界**：不做图像质量指标（SSIM/CLIP/人工评分）、不做并发压力测试、不做多实例脑裂测试、不重算全量 SHA。真实 pipeline 需要增加 golden dataset、视觉质量评估与人工抽检，并对大产物做定期哈希校验。
 
 ### 16.4 实际验证记录
 
-- `pytest tests/ -q` → **8 passed**（状态机、参数绑定、指纹、Mock 产物溯源、创建/完成、失败后重试）。
+- `pytest tests/ -q` → **10 passed**（状态机、参数绑定、指纹、Mock 产物溯源、输出契约、创建/完成、自动重试、快照化人工重试）。
 - `python scripts/demo.py all` → **7/7 PASS**（normal、retry、fatal、cache、gpu、cancel、crash）。
 - Dashboard 在 1440×1000 与 504×1700 视口截图检查；覆盖任务列表、失败详情、GPU、总览、移动端详情。
 - CP1：执行内核（正常、瞬时重试、致命失败、跨任务复用）。
