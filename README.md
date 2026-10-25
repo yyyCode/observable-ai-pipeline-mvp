@@ -93,6 +93,10 @@ python scripts/demo.py cache
 
 ![任务详情](docs/images/task-detail.png)
 
+GPU 面板在单卡 4 GB 配置下显示租约占用与 `WAITING_RESOURCE` 队列：
+
+![GPU 队列](docs/images/gpu.png)
+
 ## 3. 架构
 
 ```mermaid
@@ -389,6 +393,7 @@ docs/
 - Dashboard 在 1440×1000 与 504×1700 视口截图检查；覆盖任务列表、失败详情、GPU、总览、移动端详情。
 - CP1：执行内核（正常、瞬时重试、致命失败、跨任务复用）。
 - CP2：API、SSE、回调、Dashboard、容器化文件与端到端演示。
+- 手动验证：FAILED 任务经 `POST /retry` 后重新执行失败步骤并成功；callback outbox 实际 POST 到本地接收端，带 `Idempotency-Key`，事件流出现 `callback.sent`。
 - Docker / docker-compose 文件已提供，但本机未安装 Docker，未做容器内实跑；本地 venv 运行与 7 个演示场景均已验证。
 
 ## 17. 设计文档
