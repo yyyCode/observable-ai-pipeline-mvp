@@ -1,0 +1,12 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DATA_DIR: /app/data
+      LOG_DIR: /app/logs
+      GPU_DEVICES: '[{"id":"gpu0","memory_mb":8192}]'
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs

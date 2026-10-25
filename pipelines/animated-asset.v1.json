@@ -1,0 +1,68 @@
+{
+  "name": "animated-asset",
+  "version": "1",
+  "steps": [
+    {
+      "name": "ingest",
+      "depends_on": [],
+      "handler": "mock.ingest",
+      "params": {"source": "$task.source"},
+      "outputs": ["manifest.json"],
+      "retry": {"max_attempts": 2, "backoff_base_ms": 500, "backoff_max_ms": 4000, "retry_on": ["RETRYABLE"]},
+      "timeout_s": 30
+    },
+    {
+      "name": "extract_frames",
+      "depends_on": ["ingest"],
+      "handler": "mock.extract_frames",
+      "params": {"target_fps": "$task.target_fps"},
+      "outputs": ["frames/index.json"],
+      "retry": {"max_attempts": 3, "backoff_base_ms": 1000, "backoff_max_ms": 10000, "retry_on": ["RETRYABLE"]},
+      "timeout_s": 120
+    },
+    {
+      "name": "segment_subject",
+      "depends_on": ["extract_frames"],
+      "handler": "mock.segment_subject",
+      "gpu": {"count": 1, "memory_mb": 2048},
+      "outputs": ["masks/index.json"],
+      "retry": {"max_attempts": 3, "backoff_base_ms": 1000, "backoff_max_ms": 15000, "retry_on": ["RETRYABLE"]},
+      "timeout_s": 180
+    },
+    {
+      "name": "style_transfer",
+      "depends_on": ["segment_subject"],
+      "handler": "mock.style_transfer",
+      "params": {"style": "$task.style"},
+      "gpu": {"count": 1, "memory_mb": 3072},
+      "outputs": ["styled/index.json"],
+      "retry": {"max_attempts": 2, "backoff_base_ms": 2000, "backoff_max_ms": 20000, "retry_on": ["RETRYABLE"]},
+      "timeout_s": 240
+    },
+    {
+      "name": "upscale",
+      "depends_on": ["style_transfer"],
+      "handler": "mock.upscale",
+      "gpu": {"count": 1, "memory_mb": 2560},
+      "outputs": ["upscaled/index.json"],
+      "retry": {"max_attempts": 3, "backoff_base_ms": 1000, "backoff_max_ms": 15000, "retry_on": ["RETRYABLE"]},
+      "timeout_s": 180
+    },
+    {
+      "name": "compose_spritesheet",
+      "depends_on": ["upscale"],
+      "handler": "mock.compose_spritesheet",
+      "outputs": ["spritesheet.png", "preview.gif"],
+      "retry": {"max_attempts": 2, "backoff_base_ms": 500, "backoff_max_ms": 5000, "retry_on": ["RETRYABLE"]},
+      "timeout_s": 120
+    },
+    {
+      "name": "publish",
+      "depends_on": ["compose_spritesheet"],
+      "handler": "mock.publish",
+      "outputs": ["bundle.json", "checksums.txt"],
+      "retry": {"max_attempts": 3, "backoff_base_ms": 1000, "backoff_max_ms": 10000, "retry_on": ["RETRYABLE"]},
+      "timeout_s": 60
+    }
+  ]
+}

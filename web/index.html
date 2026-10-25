@@ -1,0 +1,912 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pipeline Production Board</title>
+<style>
+  :root {
+    --paper: #edf0e6;
+    --sheet: #f7f8f2;
+    --ink: #151913;
+    --ink-soft: #4d5649;
+    --muted: #747d6d;
+    --rule: #c4cbb9;
+    --rule-dark: #9aa48f;
+    --cel: #235f76;
+    --cel-wash: #dbe7e8;
+    --green: #2c6840;
+    --green-wash: #dfeade;
+    --amber: #8a5a10;
+    --amber-wash: #f0e5cb;
+    --red: #a13622;
+    --red-wash: #f2dfd8;
+    --gray: #61685d;
+    --gray-wash: #e4e7de;
+    --display: "Bahnschrift", "DIN Alternate", "Arial Narrow", "Segoe UI", sans-serif;
+    --body: "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    --mono: "Cascadia Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    color: var(--ink);
+    font: 14px/1.55 var(--body);
+    background-color: var(--paper);
+    background-image:
+      linear-gradient(rgba(21,25,19,.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(21,25,19,.035) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+  button, input { font: inherit; }
+  button { cursor: pointer; }
+  a { color: var(--cel); }
+  code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  :focus-visible { outline: 2px solid var(--cel); outline-offset: 2px; }
+
+  .slate {
+    display: flex; justify-content: space-between; align-items: stretch; gap: 24px;
+    min-height: 88px; padding: 16px 28px;
+    background: var(--ink); color: var(--paper);
+    border-bottom: 5px solid var(--red);
+  }
+  .brand { display: flex; align-items: center; gap: 18px; min-width: 0; }
+  .slate-mark {
+    width: 40px; height: 48px; flex: none; position: relative;
+    border: 2px solid var(--paper); border-top-width: 9px;
+  }
+  .slate-mark::before, .slate-mark::after {
+    content: ""; position: absolute; left: 6px; right: 6px; top: 10px; height: 2px;
+    background: var(--paper); opacity: .55;
+  }
+  .slate-mark::after { top: 20px; }
+  .eyebrow {
+    margin: 0 0 3px; font: 600 11px/1.2 var(--mono);
+    letter-spacing: .14em; color: #aeb8a6;
+  }
+  h1 {
+    margin: 0; font: 600 clamp(22px, 3vw, 31px)/1 var(--display);
+    letter-spacing: .015em;
+  }
+  .brand-sub { margin-top: 5px; color: #aeb8a6; font: 12px/1.3 var(--mono); }
+  .slate-side { display: flex; align-items: center; gap: 20px; }
+  .timecode { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .timecode .tc { font-size: 21px; letter-spacing: .04em; }
+  .timecode .date { color: #aeb8a6; font-size: 11px; }
+  .live {
+    display: inline-flex; align-items: center; gap: 8px;
+    border: 1px solid #5f6b59; padding: 5px 10px; color: #dfe7d9;
+    font: 600 11px/1 var(--mono); letter-spacing: .08em;
+  }
+  .live::before {
+    content: ""; width: 7px; height: 7px; background: #e06245; border-radius: 50%;
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+  .live.offline::before { background: #6b7465; animation: none; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+
+  .topbar {
+    position: sticky; top: 0; z-index: 20;
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    padding: 0 28px; background: rgba(247,248,242,.96);
+    border-bottom: 1px solid var(--rule-dark); backdrop-filter: blur(6px);
+  }
+  .tabs { display: flex; gap: 0; align-self: stretch; }
+  .tab {
+    border: 0; border-bottom: 3px solid transparent; background: none;
+    padding: 15px 2px; margin-right: 26px; color: var(--ink-soft);
+    font: 600 13px/1 var(--body); letter-spacing: .02em;
+  }
+  .tab:hover { color: var(--ink); }
+  .tab.active { color: var(--ink); border-bottom-color: var(--red); }
+  .tab .count { color: var(--muted); font-family: var(--mono); font-size: 11px; margin-left: 5px; }
+  .top-actions { display: flex; align-items: center; gap: 10px; }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+    min-height: 34px; padding: 7px 13px; border: 1px solid var(--rule-dark);
+    border-radius: 2px; background: var(--sheet); color: var(--ink);
+    font: 600 12px/1.2 var(--body); text-decoration: none;
+  }
+  .btn:hover { border-color: var(--ink); background: #fff; }
+  .btn.primary { background: var(--red); border-color: var(--red); color: #fff; }
+  .btn.primary:hover { background: #862916; border-color: #862916; }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn.quiet { border-color: transparent; background: transparent; color: var(--cel); padding-inline: 6px; }
+  .btn.quiet:hover { background: var(--cel-wash); }
+
+  main { max-width: 1320px; margin: 0 auto; padding: 24px 28px 80px; }
+  .error-banner {
+    display: none; margin-bottom: 16px; padding: 10px 14px;
+    border: 1px solid var(--red); border-left-width: 5px; background: var(--red-wash);
+    color: #661d10; font-size: 13px;
+  }
+  .error-banner.show { display: block; }
+
+  .ledger {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 0;
+    padding: 0 0 18px; margin-bottom: 18px; border-bottom: 1px solid var(--rule);
+  }
+  .ledger-item { padding: 0 26px; border-left: 1px solid var(--rule); }
+  .ledger-item:first-child { padding-left: 0; border-left: 0; }
+  .ledger-label { display: block; color: var(--muted); font-size: 11px; letter-spacing: .04em; }
+  .ledger-value { font: 600 23px/1.2 var(--display); font-variant-numeric: tabular-nums; }
+  .ledger-value small { font: 12px/1 var(--mono); color: var(--muted); margin-left: 2px; }
+  .ledger-note { margin-left: auto; color: var(--muted); font: 11px/1.4 var(--mono); }
+
+  .sheet {
+    background: var(--sheet); border: 1px solid var(--rule-dark);
+    box-shadow: 4px 4px 0 rgba(21,25,19,.055);
+  }
+  .sheet-bar {
+    display: flex; align-items: center; justify-content: space-between; gap: 14px;
+    padding: 11px 16px; border-bottom: 1px solid var(--rule-dark);
+  }
+  .sheet-title { margin: 0; font: 600 13px/1.2 var(--display); letter-spacing: .04em; }
+  .filters { display: flex; flex-wrap: wrap; gap: 4px; }
+  .filter {
+    border: 1px solid transparent; border-radius: 2px; background: none;
+    padding: 4px 8px; color: var(--muted); font-size: 11px;
+  }
+  .filter:hover { color: var(--ink); border-color: var(--rule); }
+  .filter.active { color: var(--ink); border-color: var(--rule-dark); background: var(--paper); }
+
+  .task-table { width: 100%; border-collapse: collapse; }
+  .task-table th {
+    padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--rule);
+    color: var(--muted); font: 600 10px/1.2 var(--mono); letter-spacing: .09em;
+  }
+  .task-table td { padding: 10px 12px; border-bottom: 1px solid var(--rule); vertical-align: middle; }
+  .task-row { cursor: pointer; }
+  .task-row:hover td { background: #fcfcf7; }
+  .task-row.selected td { background: var(--cel-wash); border-bottom-color: var(--cel); }
+  .task-row.selected td:first-child { box-shadow: inset 4px 0 0 var(--cel); }
+  .idx { width: 42px; color: var(--muted); font: 11px/1 var(--mono); }
+  .task-id { font-family: var(--mono); font-size: 12px; }
+  .task-id small { display: block; color: var(--muted); font-size: 10px; margin-top: 2px; }
+  .progress-cell { min-width: 150px; }
+  .segments { display: flex; gap: 2px; margin-bottom: 4px; }
+  .segments i { display: block; width: 12px; height: 7px; background: var(--gray-wash); }
+  .segments i.on { background: var(--cel); }
+  .segments i.running { background: var(--amber); animation: blink 1.4s steps(2,end) infinite; }
+  @keyframes blink { 50% { opacity: .35; } }
+  .progress-meta { color: var(--muted); font: 10px/1.2 var(--mono); }
+  .status {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 7px; border: 1px solid currentColor; border-radius: 2px;
+    font: 600 10px/1.2 var(--mono); letter-spacing: .03em; white-space: nowrap;
+  }
+  .status::before { content: ""; width: 5px; height: 5px; background: currentColor; border-radius: 50%; }
+  .st-SUCCEEDED { color: var(--green); background: var(--green-wash); }
+  .st-RUNNING, .st-RETRYING { color: var(--amber); background: var(--amber-wash); }
+  .st-FAILED { color: var(--red); background: var(--red-wash); }
+  .st-PENDING, .st-READY, .st-WAITING_RESOURCE { color: var(--cel); background: var(--cel-wash); }
+  .st-SKIPPED, .st-CANCELED { color: var(--gray); background: var(--gray-wash); }
+  .st-ABANDONED { color: var(--red); background: var(--red-wash); }
+  .current-step { font-size: 12px; }
+  .current-step .muted { display: block; font-size: 10px; }
+  .empty, .loading {
+    padding: 46px 24px; text-align: center; color: var(--muted);
+  }
+  .empty strong { display: block; color: var(--ink); font: 600 17px/1.3 var(--display); margin-bottom: 5px; }
+
+  .detail-row > td { padding: 0; background: #fbfcf6; }
+  .detail {
+    padding: 20px; border-top: 2px solid var(--cel);
+    animation: unfold .18s ease-out;
+  }
+  @keyframes unfold { from { opacity: 0; transform: translateY(-4px); } }
+  .detail-head {
+    display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between;
+    gap: 12px; padding-bottom: 14px; margin-bottom: 16px; border-bottom: 1px solid var(--rule);
+  }
+  .detail-title { margin: 0 0 4px; font: 600 16px/1.2 var(--display); }
+  .detail-meta { color: var(--muted); font: 11px/1.5 var(--mono); overflow-wrap: anywhere; }
+  .detail-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .detail-grid { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(280px, 1fr); gap: 24px; }
+  .section-title {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+    margin: 0 0 10px; font: 600 12px/1.2 var(--display); letter-spacing: .04em;
+  }
+  .section-title span { color: var(--muted); font: 10px/1 var(--mono); letter-spacing: 0; }
+
+  .steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--rule); border: 1px solid var(--rule); }
+  .step {
+    display: flex; flex-direction: column; gap: 7px; min-height: 118px;
+    padding: 10px; border: 0; border-radius: 0; background: var(--sheet); text-align: left;
+    color: var(--ink);
+  }
+  .step:hover { background: #fff; }
+  .step.selected { background: var(--cel-wash); box-shadow: inset 0 -3px 0 var(--cel); }
+  .step-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+  .step-no { color: var(--muted); font: 10px/1 var(--mono); }
+  .step-name { font: 600 12px/1.3 var(--mono); overflow-wrap: anywhere; }
+  .step-foot { display: flex; flex-wrap: wrap; gap: 6px; color: var(--muted); font: 9px/1.2 var(--mono); margin-top: auto; }
+  .step-err { color: var(--red); font: 10px/1.35 var(--mono); overflow-wrap: anywhere; }
+  .reuse-mark { color: var(--cel); font: 600 9px/1 var(--mono); }
+
+  .attempts { margin-top: 14px; border: 1px solid var(--rule); background: var(--sheet); }
+  .attempts-head { padding: 8px 11px; border-bottom: 1px solid var(--rule); font: 600 11px/1.2 var(--mono); }
+  .attempt { display: grid; grid-template-columns: 34px 100px 1fr auto; gap: 10px; align-items: baseline; padding: 9px 11px; border-bottom: 1px solid var(--rule); }
+  .attempt:last-child { border-bottom: 0; }
+  .attempt-no { color: var(--muted); font: 10px/1.2 var(--mono); }
+  .attempt-msg { font: 11px/1.4 var(--mono); overflow-wrap: anywhere; }
+  .attempt-time { color: var(--muted); font: 10px/1.2 var(--mono); white-space: nowrap; }
+  .hint { color: var(--muted); font-size: 11px; }
+
+  .eventlog { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule); max-height: 330px; overflow: auto; }
+  .eventlog li { display: grid; grid-template-columns: 12px 62px 1fr; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--rule); align-items: start; }
+  .event-dot { width: 6px; height: 6px; margin-top: 6px; background: var(--rule-dark); }
+  .event-dot.error { background: var(--red); }
+  .event-dot.good { background: var(--green); }
+  .event-dot.warn { background: var(--amber); }
+  .event-time { color: var(--muted); font: 10px/1.5 var(--mono); }
+  .event-body { font: 10px/1.5 var(--mono); overflow-wrap: anywhere; }
+  .event-body b { font: 600 10px/1.5 var(--mono); }
+  .event-body span { display: block; color: var(--muted); white-space: pre-wrap; }
+
+  .artifact-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule); }
+  .artifact-list li { padding: 7px 0; border-bottom: 1px solid var(--rule); }
+  .artifact-list a { font: 11px/1.4 var(--mono); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  .artifact-meta { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font: 9px/1.4 var(--mono); }
+  .params { margin: 12px 0 0; padding: 10px; background: var(--paper); border: 1px dashed var(--rule-dark); font: 10px/1.6 var(--mono); overflow-wrap: anywhere; }
+
+  .gpu-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+  .device {
+    background: var(--sheet); border: 1px solid var(--rule-dark); padding: 15px;
+    box-shadow: 3px 3px 0 rgba(21,25,19,.05);
+  }
+  .device-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .device-name { font: 600 18px/1.2 var(--display); }
+  .device-cap { color: var(--muted); font: 10px/1.3 var(--mono); }
+  .mem-row { display: flex; justify-content: space-between; margin: 16px 0 6px; font: 11px/1.2 var(--mono); }
+  .meter { height: 14px; border: 1px solid var(--rule-dark); background: var(--gray-wash); padding: 2px; }
+  .meter i { display: block; height: 100%; background: var(--cel); transition: width .4s ease; }
+  .meter i.hot { background: var(--red); }
+  .device-foot { margin-top: 10px; color: var(--muted); font: 10px/1.4 var(--mono); }
+  .queue { width: 100%; border-collapse: collapse; background: var(--sheet); border: 1px solid var(--rule-dark); }
+  .queue th, .queue td { padding: 9px 12px; border-bottom: 1px solid var(--rule); text-align: left; font: 11px/1.3 var(--mono); }
+  .queue th { color: var(--muted); font-size: 10px; letter-spacing: .06em; }
+  .queue tr:last-child td { border-bottom: 0; }
+  .subhead { margin: 28px 0 10px; font: 600 12px/1.2 var(--display); letter-spacing: .04em; }
+
+  .overview-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1px; background: var(--rule-dark); border: 1px solid var(--rule-dark); }
+  .metric { padding: 18px; background: var(--sheet); }
+  .metric-label { color: var(--muted); font: 11px/1.3 var(--body); }
+  .metric-value { margin-top: 4px; font: 600 32px/1.1 var(--display); font-variant-numeric: tabular-nums; }
+  .metric-value small { font: 11px/1 var(--mono); color: var(--muted); margin-left: 3px; }
+  .metric-note { margin-top: 5px; color: var(--muted); font: 10px/1.4 var(--mono); }
+  .breakdown { margin-top: 18px; background: var(--sheet); border: 1px solid var(--rule-dark); }
+  .breakdown-row { display: grid; grid-template-columns: 120px 1fr 50px; align-items: center; gap: 12px; padding: 9px 14px; border-bottom: 1px solid var(--rule); }
+  .breakdown-row:last-child { border-bottom: 0; }
+  .breakdown-label { font: 600 11px/1.2 var(--mono); }
+  .breakdown-bar { height: 7px; background: var(--gray-wash); }
+  .breakdown-bar i { display: block; height: 100%; background: var(--cel); }
+  .breakdown-n { text-align: right; font: 11px/1.2 var(--mono); }
+  .links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+
+  .toast {
+    position: fixed; left: 28px; bottom: 24px; z-index: 50;
+    padding: 10px 14px; background: var(--ink); color: var(--paper);
+    border-left: 4px solid var(--cel); font-size: 12px; max-width: min(420px, calc(100vw - 56px));
+    opacity: 0; transform: translateY(8px); pointer-events: none; transition: opacity .18s, transform .18s;
+  }
+  .toast.show { opacity: 1; transform: none; }
+  .toast.error { border-left-color: var(--red); }
+  .hidden { display: none !important; }
+
+  @media (max-width: 980px) {
+    .detail-grid { grid-template-columns: 1fr; }
+    .steps { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .slate { padding-inline: 18px; }
+    main, .topbar { padding-inline: 18px; }
+    .task-table .optional { display: none; }
+    .ledger-note { display: none; }
+  }
+  @media (max-width: 620px) {
+    .slate { flex-wrap: wrap; gap: 12px; }
+    .slate-side { width: 100%; justify-content: space-between; }
+    .timecode { text-align: left; }
+    .brand-sub { display: none; }
+    .topbar { flex-wrap: wrap; padding: 8px 14px 0; gap: 4px 8px; }
+    .tabs { order: 1; }
+    .tab { margin-right: 14px; padding-block: 10px; }
+    .top-actions { order: 2; margin-left: auto; }
+    .top-actions a.btn { display: none; }
+    .btn { padding-inline: 9px; }
+    main { padding: 16px 14px 60px; }
+    .ledger { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 0; }
+    .ledger-item { padding: 0 10px; }
+    .ledger-item:nth-child(3n + 1) { padding-left: 0; border-left: 0; }
+    .ledger-value { font-size: 20px; }
+    .ledger-note { display: none; }
+    .sheet-bar { flex-wrap: wrap; gap: 8px; }
+    .task-table { table-layout: fixed; }
+    .task-table th, .task-table td { padding: 8px 6px; }
+    .task-table thead tr > :nth-child(1),
+    .task-table thead tr > :nth-child(5),
+    .task-table thead tr > :nth-child(7),
+    .task-table tr.task-row > :nth-child(1),
+    .task-table tr.task-row > :nth-child(5),
+    .task-table tr.task-row > :nth-child(7) { display: none; }
+    .task-table th:nth-child(2) { width: 30%; }
+    .task-table th:nth-child(3) { width: 26%; }
+    .task-table th:nth-child(4) { width: 32%; }
+    .task-table th:nth-child(6) { width: 12%; }
+    .task-id small { display: none; }
+    .progress-cell { min-width: 0; }
+    .segments { gap: 1px; }
+    .segments i { width: auto; flex: 1; }
+    .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .step { min-height: 108px; padding: 8px; }
+    .step-name { font-size: 11px; }
+    .attempt { grid-template-columns: 30px 80px 1fr; }
+    .attempt-time { display: none; }
+    .detail { padding: 14px; overflow: hidden; }
+    .detail-meta { overflow-wrap: anywhere; }
+    .detail-grid aside { min-width: 0; }
+    .eventlog, .event-body, .artifact-list { min-width: 0; }
+    .eventlog li { grid-template-columns: 10px 52px minmax(0, 1fr); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+    html { scroll-behavior: auto; }
+  }
+</style>
+</head>
+<body>
+<header class="slate">
+  <div class="brand">
+    <div class="slate-mark" aria-hidden="true"></div>
+    <div>
+      <p class="eyebrow">PRODUCTION 001 / OBSERVABILITY</p>
+      <h1>动画资产流水线 · 制作看板</h1>
+      <div class="brand-sub">animated-asset@1 &nbsp;/&nbsp; 7 steps &nbsp;/&nbsp; content-addressed reuse</div>
+    </div>
+  </div>
+  <div class="slate-side">
+    <div class="timecode">
+      <div class="tc" id="timecode">--:--:--:--</div>
+      <div class="date" id="today">—</div>
+    </div>
+    <span class="live" id="live">在线</span>
+  </div>
+</header>
+
+<div class="topbar">
+  <nav class="tabs" aria-label="主导航">
+    <button class="tab active" data-tab="tasks">任务<span class="count" id="task-count">0</span></button>
+    <button class="tab" data-tab="gpu">GPU</button>
+    <button class="tab" data-tab="overview">总览</button>
+  </nav>
+  <div class="top-actions">
+    <a class="btn" href="/docs" target="_blank" rel="noreferrer">API 文档</a>
+    <button class="btn primary" id="create-task">新建演示任务</button>
+  </div>
+</div>
+
+<main>
+  <div class="error-banner" id="error-banner" role="alert"></div>
+
+  <section id="tab-tasks">
+    <div class="ledger" aria-label="运行概况">
+      <div class="ledger-item"><span class="ledger-label">任务总数</span><span class="ledger-value" id="kpi-total">—</span></div>
+      <div class="ledger-item"><span class="ledger-label">进行中</span><span class="ledger-value" id="kpi-active">—</span></div>
+      <div class="ledger-item"><span class="ledger-label">成功率</span><span class="ledger-value" id="kpi-rate">—</span></div>
+      <div class="ledger-item"><span class="ledger-label">平均耗时</span><span class="ledger-value" id="kpi-avg">—</span></div>
+      <div class="ledger-item"><span class="ledger-label">缓存命中</span><span class="ledger-value" id="kpi-cache">—</span></div>
+      <span class="ledger-note" id="last-refresh">每 2 秒刷新</span>
+    </div>
+
+    <div class="sheet">
+      <div class="sheet-bar">
+        <h2 class="sheet-title">任务放片表</h2>
+        <div class="filters" id="filters" aria-label="状态筛选">
+          <button class="filter active" data-filter="all">全部</button>
+          <button class="filter" data-filter="active">进行中</button>
+          <button class="filter" data-filter="SUCCEEDED">已完成</button>
+          <button class="filter" data-filter="FAILED">失败</button>
+        </div>
+      </div>
+      <table class="task-table">
+        <thead>
+          <tr>
+            <th scope="col">#</th>
+            <th scope="col">任务</th>
+            <th scope="col">状态</th>
+            <th scope="col">进度</th>
+            <th scope="col" class="optional">当前步骤</th>
+            <th scope="col">耗时</th>
+            <th scope="col" class="optional">复用</th>
+          </tr>
+        </thead>
+        <tbody id="task-body">
+          <tr><td colspan="7" class="loading">正在读取任务…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="tab-gpu" class="hidden">
+    <div class="gpu-grid" id="gpu-devices"></div>
+    <h2 class="subhead">等待显存的步骤</h2>
+    <table class="queue">
+      <thead><tr><th>任务</th><th>步骤</th><th>显存</th><th>尝试</th></tr></thead>
+      <tbody id="gpu-queue"><tr><td colspan="4" class="loading">正在读取 GPU 状态…</td></tr></tbody>
+    </table>
+    <p class="hint" id="gpu-note">Mock 调度器按显存容量授予租约；容量不足的步骤保持在 WAITING_RESOURCE。</p>
+  </section>
+
+  <section id="tab-overview" class="hidden">
+    <div class="overview-grid" id="overview-grid"></div>
+    <div class="breakdown" id="breakdown"></div>
+    <div class="links">
+      <a class="btn" href="/metrics" target="_blank" rel="noreferrer">Prometheus 指标</a>
+      <a class="btn" href="/healthz" target="_blank" rel="noreferrer">健康检查</a>
+      <a class="btn" href="/docs" target="_blank" rel="noreferrer">OpenAPI</a>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+const $ = (s, root = document) => root.querySelector(s);
+const $$ = (s, root = document) => Array.from(root.querySelectorAll(s));
+const STATUS_LABEL = {
+  PENDING: "等待", READY: "就绪", RUNNING: "运行中", RETRYING: "重试中",
+  WAITING_RESOURCE: "等资源", SUCCEEDED: "完成", FAILED: "失败",
+  SKIPPED: "跳过", CANCELED: "已取消", ABANDONED: "已中断"
+};
+const ACTIVE = new Set(["PENDING", "READY", "RUNNING", "RETRYING", "WAITING_RESOURCE"]);
+const state = {
+  tab: "tasks", filter: "all", tasks: [], task: null, selectedId: null,
+  selectedStep: null, attempts: [], attemptsFor: null, gpu: null, overview: null,
+  loaded: false, busy: false, error: ""
+};
+
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, c => (
+  {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]
+));
+const statusLabel = (s) => STATUS_LABEL[s] || s || "未知";
+const statusClass = (s) => /^[A-Z_]+$/.test(String(s)) ? `st-${s}` : "st-ABANDONED";
+const statusChip = (s) => `<span class="status ${statusClass(s)}" title="${esc(s)}">${esc(statusLabel(s))}</span>`;
+const fmtTime = (s) => {
+  if (!s) return "—";
+  const d = new Date(s);
+  return Number.isNaN(d.valueOf()) ? "—" : d.toLocaleTimeString("zh-CN", { hour12: false });
+};
+const fmtDate = (s) => {
+  if (!s) return "—";
+  const d = new Date(s);
+  return Number.isNaN(d.valueOf()) ? "—" : d.toLocaleString("zh-CN", { hour12: false });
+};
+const fmtDuration = (v) => (Number.isFinite(Number(v)) ? `${Number(v).toFixed(1)}s` : "—");
+const pct = (v) => Math.max(0, Math.min(100, Number(v) || 0));
+const shortId = (id) => String(id || "").slice(0, 8);
+
+async function api(path, options = {}) {
+  const res = await fetch(path, {
+    headers: { "Content-Type": "application/json" },
+    ...options
+  });
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      const body = await res.json();
+      detail = body.detail ? `${detail} · ${typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail)}` : detail;
+    } catch (_) {}
+    throw new Error(detail);
+  }
+  return res.status === 204 ? null : res.json();
+}
+
+let toastTimer = null;
+function toast(message, isError = false) {
+  const el = $("#toast");
+  el.textContent = message;
+  el.classList.toggle("error", isError);
+  el.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("show"), 3200);
+}
+
+function setError(message) {
+  state.error = message || "";
+  const el = $("#error-banner");
+  el.textContent = state.error ? `连接异常：${state.error}` : "";
+  el.classList.toggle("show", Boolean(state.error));
+  $("#live").classList.toggle("offline", Boolean(state.error));
+  $("#live").textContent = state.error ? "离线" : "在线";
+}
+
+function tickClock() {
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const frames = Math.floor(now.getMilliseconds() / 1000 * 24);
+  $("#timecode").textContent = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}:${pad(frames)}`;
+  $("#today").textContent = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} · 24 fps`;
+}
+
+function visibleTasks() {
+  if (state.filter === "all") return state.tasks;
+  if (state.filter === "active") return state.tasks.filter(t => ACTIVE.has(t.status));
+  return state.tasks.filter(t => t.status === state.filter);
+}
+
+function renderTaskRows() {
+  const body = $("#task-body");
+  const rows = visibleTasks();
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="7" class="empty"><strong>${state.tasks.length ? "没有符合筛选的任务" : "还没有任务"}</strong>${state.tasks.length ? "切换到「全部」查看。" : "点击右上角「新建演示任务」开始一次流水线执行。"}</td></tr>`;
+    return;
+  }
+  const allIndex = new Map(state.tasks.map((t, i) => [t.id, i + 1]));
+  body.innerHTML = rows.map(t => {
+    const done = Math.round(pct(t.progress) / 10);
+    const running = t.status === "RUNNING" || t.status === "RETRYING" || t.status === "WAITING_RESOURCE";
+    const segs = Array.from({ length: 10 }, (_, i) => {
+      const cls = i < done ? "on" : (running && i === done ? "running" : "");
+      return `<i class="${cls}"></i>`;
+    }).join("");
+    const selected = state.selectedId === t.id ? "selected" : "";
+    return `
+      <tr class="task-row ${selected}" data-task="${esc(t.id)}" tabindex="0" aria-expanded="${state.selectedId === t.id}">
+        <td class="idx">${String(allIndex.get(t.id)).padStart(2, "0")}</td>
+        <td><div class="task-id">${esc(shortId(t.id))}<small>${esc(fmtDate(t.created_at))}</small></div></td>
+        <td>${statusChip(t.status)}</td>
+        <td class="progress-cell"><div class="segments" aria-hidden="true">${segs}</div><div class="progress-meta">${pct(t.progress)}%</div></td>
+        <td class="current-step optional">${esc(t.current_step || "—")}${ACTIVE.has(t.status) ? '<span class="muted">执行中</span>' : ""}</td>
+        <td class="mono">${fmtDuration(t.duration_s)}</td>
+        <td class="mono optional">${t.reused_steps ? `${t.reused_steps} 步` : "—"}</td>
+      </tr>
+      ${state.selectedId === t.id && state.task && state.task.id === t.id ? detailRow(state.task) : ""}`;
+  }).join("");
+  if (state.selectedId && (!state.task || state.task.id !== state.selectedId)) {
+    // 详情还在加载，保留已选行的高亮，不阻塞列表。
+  }
+}
+
+function detailRow(task) {
+  const steps = (task.steps || []).map((s, i) => {
+    const attempts = Number(s.attempt_count) || 0;
+    const selected = state.selectedStep === s.name ? "selected" : "";
+    return `
+      <button class="step ${selected}" data-step="${esc(s.name)}" aria-pressed="${state.selectedStep === s.name}">
+        <span class="step-top"><span class="step-no">${String(i + 1).padStart(2, "0")}</span>${statusChip(s.status)}</span>
+        <span class="step-name">${esc(s.name)}</span>
+        ${s.error_code ? `<span class="step-err">${esc(s.error_code)}</span>` : ""}
+        <span class="step-foot">
+          <span>尝试 ${attempts}</span>
+          ${s.reused ? '<span class="reuse-mark">复用缓存</span>' : ""}
+          ${s.status === "FAILED" ? '<span class="step-err">点击查看尝试</span>' : ""}
+        </span>
+      </button>`;
+  }).join("");
+
+  const artifacts = (task.artifacts || []).map(a => `
+    <li>
+      <a href="${esc(a.download_url)}">${esc(a.name)}</a>
+      <div class="artifact-meta"><span>${esc(a.step)}</span><span>${formatBytes(a.size_bytes)} · ${esc(String(a.sha256).slice(0, 10))}</span></div>
+    </li>`).join("") || '<li class="hint">任务完成后可下载产物。</li>';
+
+  const events = (task.events || []).slice().reverse().slice(0, 80).map(e => {
+    const type = String(e.type || "");
+    const tone = /fail|error|abandon/i.test(type) ? "error" : /succeed|complete|resume|recovery/i.test(type) ? "good" : /retry|cancel|wait|skip/i.test(type) ? "warn" : "";
+    const payload = e.payload && Object.keys(e.payload).length ? JSON.stringify(e.payload) : "";
+    return `<li><span class="event-dot ${tone}" aria-hidden="true"></span><span class="event-time">${esc(fmtTime(e.created_at))}</span><span class="event-body"><b>${esc(type)}</b>${payload ? `<span>${esc(truncate(payload, 220))}</span>` : ""}</span></li>`;
+  }).join("") || '<li class="hint">暂无事件。</li>';
+
+  const canCancel = ACTIVE.has(task.status) && !task.cancel_requested;
+  const actions = [
+    canCancel ? `<button class="btn" data-action="cancel" data-id="${esc(task.id)}">取消任务</button>` : "",
+    task.status === "FAILED" ? `<button class="btn" data-action="retry" data-id="${esc(task.id)}">重试失败任务</button>` : "",
+    task.cancel_requested && ACTIVE.has(task.status) ? '<span class="hint">正在取消…</span>' : ""
+  ].join("");
+
+  const params = Object.keys(task.params || {}).length
+    ? `<div class="params">输入参数：${esc(JSON.stringify(task.params))}</div>` : "";
+
+  return `
+    <tr class="detail-row"><td colspan="7"><div class="detail">
+      <div class="detail-head">
+        <div>
+          <h3 class="detail-title">任务 ${esc(shortId(task.id))} · ${esc(statusLabel(task.status))}</h3>
+          <div class="detail-meta">${esc(task.pipeline)}@${esc(task.version)} &nbsp;·&nbsp; 总耗时 ${fmtDuration(task.duration_s)} &nbsp;·&nbsp; 创建 ${esc(fmtDate(task.created_at))}</div>
+          <div class="detail-meta">${esc(task.id)}</div>
+        </div>
+        <div class="detail-actions">${actions}</div>
+      </div>
+      ${params}
+      <div class="detail-grid">
+        <div>
+          <h4 class="section-title">步骤时间线 <span>${(task.steps || []).length} steps / 失败可单步重试</span></h4>
+          <div class="steps">${steps}</div>
+          ${attemptPanel(task)}
+          ${task.error_message ? `<p class="step-err">任务错误：${esc(task.error_code || "")} · ${esc(task.error_message)}</p>` : ""}
+        </div>
+        <aside>
+          <h4 class="section-title">事件记录 <span>${(task.events || []).length}</span></h4>
+          <ul class="eventlog">${events}</ul>
+          <h4 class="section-title" style="margin-top:18px">产物 <span>${(task.artifacts || []).length} files</span></h4>
+          <ul class="artifact-list">${artifacts}</ul>
+        </aside>
+      </div>
+    </div></td></tr>`;
+}
+
+function attemptPanel(task) {
+  if (!state.selectedStep) {
+    return '<p class="hint" style="margin-top:12px">选择任意步骤查看每次尝试的错误分类、耗时与错误码。</p>';
+  }
+  const step = (task.steps || []).find(s => s.name === state.selectedStep);
+  if (!step) return "";
+  let body;
+  if (state.attemptsFor !== step.name) {
+    body = '<div class="attempts-head">正在读取尝试记录…</div>';
+  } else if (!state.attempts.length) {
+    body = '<div class="attempts-head">这个步骤还没有尝试记录（可能仍等待执行）。</div>';
+  } else {
+    body = state.attempts.map(a => `
+      <div class="attempt">
+        <span class="attempt-no">#${esc(a.attempt_no)}</span>
+        ${statusChip(a.status)}
+        <span class="attempt-msg">${esc(a.error_code || "—")} ${a.error_message ? `· ${esc(a.error_message)}` : ""}</span>
+        <span class="attempt-time">${esc(fmtTime(a.started_at))} → ${a.finished_at ? esc(fmtTime(a.finished_at)) : "…"}</span>
+      </div>`).join("");
+  }
+  return `<div class="attempts">
+    <div class="attempts-head">${esc(step.name)} · 尝试记录</div>
+    ${body}
+    ${step.status === "FAILED" ? `<div style="padding:9px 11px"><button class="btn" data-action="retry-step" data-id="${esc(task.id)}" data-step="${esc(step.name)}">重试此步骤</button> <span class="hint">会一并重置下游步骤</span></div>` : ""}
+  </div>`;
+}
+
+function formatBytes(bytes) {
+  const n = Number(bytes) || 0;
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+function truncate(text, max) {
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+async function loadTask(id, { silent = false } = {}) {
+  if (!silent) state.selectedStep = null;
+  state.selectedId = id;
+  history.replaceState(null, "", `?task=${encodeURIComponent(id)}`);
+  renderTaskRows();
+  try {
+    const task = await api(`/api/tasks/${encodeURIComponent(id)}`);
+    if (state.selectedId !== id) return;
+    state.task = task;
+    if (state.selectedStep && !task.steps.some(s => s.name === state.selectedStep)) {
+      state.selectedStep = null;
+    }
+    renderTaskRows();
+    if (state.selectedStep) await loadAttempts(id, state.selectedStep);
+  } catch (e) {
+    toast(`读取任务失败：${e.message}`, true);
+  }
+}
+
+async function loadAttempts(taskId, stepName) {
+  state.attemptsFor = stepName;
+  renderTaskRows();
+  try {
+    const attempts = await api(`/api/tasks/${encodeURIComponent(taskId)}/steps/${encodeURIComponent(stepName)}/attempts`);
+    if (state.selectedStep !== stepName) return;
+    state.attempts = attempts;
+  } catch (e) {
+    state.attempts = [];
+    toast(`读取尝试记录失败：${e.message}`, true);
+  }
+  state.attemptsFor = stepName;
+  renderTaskRows();
+}
+
+function renderGpu() {
+  const g = state.gpu;
+  if (!g) return;
+  const devices = g.devices || [];
+  $("#gpu-devices").innerHTML = devices.length ? devices.map(d => {
+    const used = Number(d.memory_used_mb) || 0;
+    const total = Number(d.memory_total_mb) || 0;
+    const ratio = total ? Math.min(100, used / total * 100) : 0;
+    return `<div class="device">
+      <div class="device-head"><span class="device-name">${esc(d.id)}</span><span class="device-cap">${d.leases?.length ?? 0} 个租约</span></div>
+      <div class="mem-row"><span>显存占用</span><span>${used} / ${total} MB</span></div>
+      <div class="meter" role="meter" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${used}" aria-label="${esc(d.id)} 显存占用"><i class="${ratio > 85 ? "hot" : ""}" style="width:${ratio}%"></i></div>
+      <div class="device-foot">${ratio.toFixed(0)}% 已分配${d.leases?.length ? ` · ${d.leases.map(l => `${esc(l.attempt_id.slice(0, 8))} (${l.memory_mb} MB)`).join(" / ")}` : ""}</div>
+    </div>`;
+  }).join("") : '<div class="device"><div class="device-name">没有可用 GPU</div><div class="device-foot">设置 GPU_DEVICES 后重启服务。</div></div>';
+  const queue = g.queue || [];
+  $("#gpu-queue").innerHTML = queue.length ? queue.map(q => `
+    <tr><td>${esc(shortId(q.task_id))}</td><td>${esc(q.name)}</td><td>${Number(q.gpu_memory_mb) || 0} MB</td><td>${Number(q.attempt_no) || "—"}</td></tr>
+  `).join("") : '<tr><td colspan="4" class="empty" style="padding:22px">队列为空，所有 GPU 步骤都能立即获得资源。</td></tr>';
+  $("#gpu-note").textContent = `共 ${devices.length} 个虚拟设备，队列 ${queue.length} 个步骤；等待中的步骤不会消耗重试次数。`;
+}
+
+function renderOverview() {
+  const o = state.overview;
+  if (!o) return;
+  const metrics = [
+    ["累计任务", o.tasks_total, "条", "全部提交到流水线的任务"],
+    ["进行中", o.tasks_active, "条", "包含等待与运行中的任务"],
+    ["成功率", o.success_rate_pct, "%", `${o.tasks_succeeded} 成功 / ${o.tasks_failed} 失败`],
+    ["平均耗时", o.avg_duration_s, "s", "仅统计成功任务"],
+    ["缓存命中", o.cache_hits, "次", "跨任务复用的步骤次数"]
+  ];
+  $("#overview-grid").innerHTML = metrics.map(([label, value, unit, note]) => `
+    <div class="metric"><div class="metric-label">${esc(label)}</div><div class="metric-value">${esc(value)}<small>${esc(unit)}</small></div><div class="metric-note">${esc(note)}</div></div>
+  `).join("");
+
+  const counts = {};
+  for (const t of state.tasks) counts[t.status] = (counts[t.status] || 0) + 1;
+  const rows = Object.keys(STATUS_LABEL).filter(s => counts[s]).map(s => {
+    const n = counts[s];
+    const width = state.tasks.length ? n / state.tasks.length * 100 : 0;
+    return `<div class="breakdown-row">
+      <span class="breakdown-label">${esc(statusLabel(s))}</span>
+      <span class="breakdown-bar"><i style="width:${width}%"></i></span>
+      <span class="breakdown-n">${n}</span>
+    </div>`;
+  }).join("") || '<div class="empty">暂无状态数据。</div>';
+  $("#breakdown").innerHTML = `<div class="sheet-bar"><h2 class="sheet-title">当前任务状态分布</h2><span class="hint">最近 ${state.tasks.length} 条</span></div>${rows}`;
+}
+
+async function refresh({ silent = false } = {}) {
+  try {
+    const [tasks, overview, gpu] = await Promise.all([
+      api("/api/tasks?limit=100"),
+      api("/api/overview"),
+      api("/api/gpu")
+    ]);
+    state.tasks = tasks;
+    state.overview = overview;
+    state.gpu = gpu;
+    state.loaded = true;
+    setError("");
+    $("#task-count").textContent = String(tasks.length);
+    $("#kpi-total").textContent = overview.tasks_total;
+    $("#kpi-active").textContent = overview.tasks_active;
+    $("#kpi-rate").innerHTML = `${esc(overview.success_rate_pct)}<small>%</small>`;
+    $("#kpi-avg").innerHTML = `${esc(overview.avg_duration_s)}<small>s</small>`;
+    $("#kpi-cache").textContent = overview.cache_hits;
+    $("#last-refresh").textContent = `最近刷新 ${new Date().toLocaleTimeString("zh-CN", { hour12: false })} · 每 2 秒`;
+    if (state.selectedId) {
+      try {
+        const task = await api(`/api/tasks/${encodeURIComponent(state.selectedId)}`);
+        state.task = task;
+        if (state.selectedStep) {
+          const attempts = await api(`/api/tasks/${encodeURIComponent(state.selectedId)}/steps/${encodeURIComponent(state.selectedStep)}/attempts`);
+          if (state.selectedStep) {
+            state.attempts = attempts;
+            state.attemptsFor = state.selectedStep;
+          }
+        }
+      } catch (e) {
+        if (!silent) toast(`任务详情刷新失败：${e.message}`, true);
+      }
+    }
+    renderTaskRows();
+    renderGpu();
+    renderOverview();
+  } catch (e) {
+    setError(e.message);
+    if (!state.loaded) {
+      $("#task-body").innerHTML = `<tr><td colspan="7" class="empty"><strong>无法连接服务</strong>请确认 uvicorn 已启动，然后等待自动重试。</td></tr>`;
+    }
+  }
+}
+
+async function createTask() {
+  if (state.busy) return;
+  state.busy = true;
+  $("#create-task").disabled = true;
+  const source = `demo/${crypto.randomUUID().slice(0, 8)}.gif`;
+  const styles = ["watercolor", "cel-shade", "ink-wash"];
+  try {
+    await api("/api/tasks", {
+      method: "POST",
+      body: JSON.stringify({
+        pipeline: "animated-asset", version: "1",
+        params: { source, style: styles[Math.floor(Math.random() * styles.length)], target_fps: 12 }
+      })
+    });
+    toast(`任务已提交 · ${source}`);
+    await refresh();
+  } catch (e) {
+    toast(`创建失败：${e.message}`, true);
+  } finally {
+    state.busy = false;
+    $("#create-task").disabled = false;
+  }
+}
+
+async function action(name, id, step) {
+  if (name === "cancel" && !confirm("取消这个任务？已完成的步骤会保留，未开始的步骤会标记为已取消。")) return;
+  const path = name === "retry-step"
+    ? `/api/tasks/${encodeURIComponent(id)}/steps/${encodeURIComponent(step)}/retry`
+    : `/api/tasks/${encodeURIComponent(id)}/${name}`;
+  try {
+    await api(path, { method: "POST" });
+    toast(name === "cancel" ? "已发送取消请求" : name === "retry-step" ? `正在重试 ${step}` : "已重新提交失败步骤");
+    await refresh();
+    if (id) await loadTask(id, { silent: true });
+  } catch (e) {
+    toast(`操作失败：${e.message}`, true);
+  }
+}
+
+function switchTab(tab) {
+  state.tab = tab;
+  $$(".tab").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+  ["tasks", "gpu", "overview"].forEach(t => $(`#tab-${t}`).classList.toggle("hidden", t !== tab));
+  const params = new URLSearchParams(location.search);
+  if (tab === "tasks") params.delete("tab"); else params.set("tab", tab);
+  const query = params.toString();
+  history.replaceState(null, "", query ? `?${query}` : location.pathname);
+  if (tab === "overview") renderOverview();
+  if (tab === "gpu") renderGpu();
+}
+
+$("#create-task").addEventListener("click", createTask);
+$$(".tab").forEach(b => b.addEventListener("click", () => switchTab(b.dataset.tab)));
+$$(".filter").forEach(b => b.addEventListener("click", () => {
+  state.filter = b.dataset.filter;
+  $$(".filter").forEach(x => x.classList.toggle("active", x === b));
+  renderTaskRows();
+}));
+
+$("#task-body").addEventListener("click", (event) => {
+  const stepBtn = event.target.closest("[data-step]");
+  if (stepBtn && !event.target.closest("[data-action]")) {
+    const name = stepBtn.dataset.step;
+    state.selectedStep = state.selectedStep === name ? null : name;
+    state.attempts = [];
+    state.attemptsFor = state.selectedStep;
+    renderTaskRows();
+    if (state.selectedStep && state.selectedId) loadAttempts(state.selectedId, state.selectedStep);
+    return;
+  }
+  const actionBtn = event.target.closest("[data-action]");
+  if (actionBtn) {
+    event.stopPropagation();
+    action(actionBtn.dataset.action, actionBtn.dataset.id, actionBtn.dataset.step);
+    return;
+  }
+  const row = event.target.closest("[data-task]");
+  if (row) {
+    if (state.selectedId === row.dataset.task) {
+      state.selectedId = null; state.task = null; state.selectedStep = null;
+      history.replaceState(null, "", location.pathname);
+      renderTaskRows();
+    } else {
+      loadTask(row.dataset.task);
+    }
+  }
+});
+$("#task-body").addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const row = event.target.closest("[data-task]");
+  if (row) {
+    event.preventDefault();
+    loadTask(row.dataset.task);
+  }
+});
+
+tickClock();
+setInterval(tickClock, 250);
+const initialParams = new URLSearchParams(location.search);
+const initialTab = initialParams.get("tab");
+if (["gpu", "overview"].includes(initialTab)) switchTab(initialTab);
+refresh().then(() => {
+  const initialTask = initialParams.get("task");
+  if (initialTask) loadTask(initialTask);
+});
+setInterval(() => refresh({ silent: true }), 2000);
+</script>
+</body>
+</html>
